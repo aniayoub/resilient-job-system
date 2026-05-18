@@ -2,24 +2,25 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
-	"github/aniayoub/resilient-job-system/internal/job"
+	"github/aniayoub/resilient-job-system/internal/logging"
 	"github/aniayoub/resilient-job-system/internal/store"
-
-	"github.com/google/uuid"
 )
 
 type Handler struct {
-	store *store.Store
+	store  *store.Store
+	queue  chan<- string // Handlers should only write to the queue, so we use a send-only channel
+	logger *slog.Logger
 }
 
 type CreateJobRequest struct {
 	Payload string `json:"payload"`
 }
 
-func NewHander(store *store.Store) *Handler {
-	return &Handler{store: store}
+func NewHandler(store *store.Store, queue chan<- string, logger *slog.Logger) *Handler {
+	return &Handler{store: store, queue: queue, logger: logger}
 }
 
 func (h *Handler) RegisterRoutes() {
@@ -28,13 +29,17 @@ func (h *Handler) RegisterRoutes() {
 }
 
 func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
+	logger := h.logger.With("request_id", logging.RequestIDFromContext(r.Context()))
+
 	if r.Method != http.MethodGet {
+		logger.Warn("method not allowed", "method", r.Method, "path", r.URL.Path)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
 	id := r.URL.Path[len("/jobs/"):]
 	if id == "" {
+		logger.Warn("missing job id", "path", r.URL.Path)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -42,10 +47,12 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 	job, err := h.store.GetJob(id)
 	if err != nil {
 		if err == store.ErrJobNotFound {
+			logger.Warn("job not found", "job_id", id)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 
+		logger.Error("failed to fetch job", "job_id", id, "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -55,13 +62,20 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 
 	err = json.NewEncoder(w).Encode(job)
 	if err != nil {
+		logger.Error("failed to encode job", "job_id", job.ID, "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	logger.Info("job fetched", "job_id", job.ID, "status", job.Status)
 }
 
 func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
+	logger := h.logger.With("request_id", logging.RequestIDFromContext(r.Context()))
+
+	// Only allow POST method for creating jobs
 	if r.Method != http.MethodPost {
+		logger.Warn("method not allowed", "method", r.Method, "path", r.URL.Path)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
@@ -70,11 +84,14 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&req)
 
 	if err != nil {
+		logger.Warn("invalid create job payload", "error", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
+	// Basic validation to ensure payload is provided
 	if req.Payload == "" {
+		logger.Warn("missing payload in create job request")
 		w.WriteHeader(http.StatusBadRequest)
 
 		err := json.NewEncoder(w).Encode(map[string]string{
@@ -86,19 +103,22 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	j := job.Job{
-		ID:      uuid.New().String(),
-		Status:  job.StatusPending,
-		Payload: req.Payload,
-	}
 
-	h.store.CreateJob(j)
+	// Create a new job in the store
+	j := h.store.CreateJob(req.Payload)
+	logger.Info("job created", "job_id", j.ID, "status", j.Status, "payload_size", len(req.Payload))
 
+	// Send the job ID to the queue for processing
+	h.queue <- j.ID
+	logger.Info("job queued", "job_id", j.ID)
+
+	// Send the created job back in the response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
 	err = json.NewEncoder(w).Encode(j)
 	if err != nil {
+		logger.Error("failed to encode created job", "job_id", j.ID, "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

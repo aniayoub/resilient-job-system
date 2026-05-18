@@ -1,26 +1,44 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"net/http"
 
 	"github/aniayoub/resilient-job-system/internal/httpapi"
+	"github/aniayoub/resilient-job-system/internal/logging"
 	"github/aniayoub/resilient-job-system/internal/store"
+	"github/aniayoub/resilient-job-system/internal/worker"
 )
 
 func main() {
-	// Initialize an in-memory store for jobs
-	store := store.NewStore()
+	ctx := context.Background()
+	logger := logging.New()
 
-	handler := httpapi.NewHander(store)
+	// Initialize an in-memory jobStore for jobs
+	jobStore := store.NewStore()
 
+	// Initialize a shared queue for workers
+	queue := make(chan string, 100)
+
+	// Initialize handler with the store and queue
+	handler := httpapi.NewHandler(jobStore, queue, logger.With("component", "httpapi"))
 	handler.RegisterRoutes()
 
-	// Listen to http requests and handle job creation, status retrieval, etc.
-	log.Println("starting server on :8080")
+	// Initialize and start a worker
+	worker := worker.NewWorker(jobStore, queue, logger.With("component", "worker"))
+	worker.Start(ctx)
 
-	err := http.ListenAndServe("localhost:8080", nil)
+	server := &http.Server{
+		Addr:    "localhost:8080",
+		Handler: logging.WithRequestLogging(logger.With("component", "http"), http.DefaultServeMux),
+	}
+
+	// Listen to http requests and handle job creation, status retrieval, etc.
+	logger.Info("starting server", slog.String("addr", server.Addr))
+
+	err := server.ListenAndServe()
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("server stopped", slog.Any("error", err))
 	}
 }
