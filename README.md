@@ -2,7 +2,7 @@
 
 This is a Go learning project built in phases.
 
-Current phase: a basic resilient job system with an HTTP API, an in-memory store, a shared queue, and a single background worker.
+Current phase: a basic resilient job system with an HTTP API, an in-memory store, a shared queue, a worker pool, and retry handling for failed jobs.
 
 Small Go service for submitting background jobs and polling their status over HTTP.
 
@@ -13,16 +13,17 @@ The project exposes a simple API that stores jobs in memory, queues them for asy
 - Accepts job creation requests over HTTP.
 - Queues jobs for background processing.
 - Tracks job state in memory.
-- Simulates work with a single worker.
-- Randomly fails some jobs to demonstrate error handling.
+- Processes jobs with a pool of workers.
+- Retries failed jobs up to a configured limit.
+- Returns a temporary error when the queue is full.
 
 ## Project Layout
 
 - `cmd/api`: starts the HTTP API server on `localhost:8080`.
 - `cmd/flood`: sends many job creation requests to the API for quick load testing.
 - `internal/httpapi`: HTTP handlers and route registration.
-- `internal/worker`: background worker loop.
-- `internal/store`: in-memory job storage.
+- `internal/worker`: worker pool and retry behavior.
+- `internal/store`: in-memory job storage and retry tracking.
 - `internal/job`: job model and statuses.
 
 ## Run
@@ -74,8 +75,18 @@ Successful response returns `201 Created` with the new job:
   "id": "2e6f7d48-2f8d-4d07-b967-0f6ef40e3f8f",
   "status": "pending",
   "payload": "process this job",
+  "retry_count": 0,
+  "max_retries": 5,
   "created_at": "2026-05-18T12:00:00Z",
   "updated_at": "2026-05-18T12:00:00Z"
+}
+```
+
+If the queue is full, the API returns `503 Service Unavailable`:
+
+```json
+{
+  "error": "job queue is full, please try again later"
 }
 ```
 
@@ -90,10 +101,21 @@ Possible job statuses:
 - `done`
 - `failed`
 
-Completed jobs include a `result` field. Failed jobs also return an error/result message from the worker.
+Job responses also include retry metadata:
+
+- `retry_count`: how many retry attempts have already been used.
+- `max_retries`: maximum retries allowed for the job.
+- `last_error`: the latest processing error before a retry or final failure.
+
+Completed jobs include a `result` field. Failed jobs include the final failure information.
 
 ## Notes
 
 - Storage is in memory only, so all jobs are lost when the API process stops.
 - Processing is simulated with a fixed delay of about 3 seconds.
-- The worker intentionally fails some jobs to exercise retry/error paths during development.
+- The API currently starts 5 workers.
+- The worker intentionally fails some jobs to exercise retry and failure paths during development.
+
+## Documentation Note
+
+This README was drafted with AI assistance and reviewed by the developer.

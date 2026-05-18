@@ -109,17 +109,36 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	logger.Info("job created", "job_id", j.ID, "status", j.Status, "payload_size", len(req.Payload))
 
 	// Send the job ID to the queue for processing
-	h.queue <- j.ID
-	logger.Info("job queued", "job_id", j.ID)
+	select {
+	case h.queue <- j.ID:
+		// Job ID successfully sent to the queue
+		logger.Info("job queued", "job_id", j.ID)
 
-	// Send the created job back in the response
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+		// Send the created job back in the response
+		w.Header().Set("Content-Type", "application/json")
 
-	err = json.NewEncoder(w).Encode(j)
-	if err != nil {
-		logger.Error("failed to encode created job", "job_id", j.ID, "error", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusCreated)
+		err = json.NewEncoder(w).Encode(j)
+		if err != nil {
+			logger.Error("failed to encode created job", "job_id", j.ID, "error", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+	default:
+		// Queue is full, mark job as failed and return an error response
+		logger.Error("job queue is full, cannot process job", "job_id", j.ID)
+
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+
+		err = json.NewEncoder(w).Encode(map[string]string{
+			"error": "job queue is full, please try again later",
+		})
+		if err != nil {
+			logger.Error("failed to encode queue full response", "job_id", j.ID, "error", err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 		return
 	}
+
 }

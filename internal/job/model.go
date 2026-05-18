@@ -12,11 +12,14 @@ const (
 )
 
 type Job struct {
-	ID        string    `json:"id"`
-	Status    Status    `json:"status"`
-	Payload   string    `json:"payload"`
-	Result    string    `json:"result,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	Status     Status    `json:"status"`
+	Payload    string    `json:"payload"`
+	Result     string    `json:"result,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	RetryCount int       `json:"retry_count"`
+	MaxRetries int       `json:"max_retries"`
+	LastError  string    `json:"last_error,omitempty"`
 }

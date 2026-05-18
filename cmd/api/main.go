@@ -25,9 +25,12 @@ func main() {
 	handler := httpapi.NewHandler(jobStore, queue, logger.With("component", "httpapi"))
 	handler.RegisterRoutes()
 
-	// Initialize and start a worker
-	worker := worker.NewWorker(jobStore, queue, logger.With("component", "worker"))
-	worker.Start(ctx)
+	// Initialize and start a pool of workers
+	workerCount := 5
+	for i := 0; i < workerCount; i++ {
+		worker := worker.NewWorker(i, jobStore, queue, logger.With("component", "worker", "worker_id", i))
+		worker.Start(ctx)
+	}
 
 	server := &http.Server{
 		Addr:    "localhost:8080",
