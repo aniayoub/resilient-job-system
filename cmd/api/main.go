@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github/aniayoub/resilient-job-system/internal/httpapi"
 	"github/aniayoub/resilient-job-system/internal/logging"
@@ -12,7 +17,14 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	// Initialize structured logger
 	logger := logging.New()
 
 	// Initialize an in-memory jobStore for jobs
@@ -37,11 +49,31 @@ func main() {
 		Handler: logging.WithRequestLogging(logger.With("component", "http"), http.DefaultServeMux),
 	}
 
-	// Listen to http requests and handle job creation, status retrieval, etc.
-	logger.Info("starting server", slog.String("addr", server.Addr))
+	go func() {
+		// Listen to http requests and handle job creation, status retrieval, etc.
+		logger.Info("starting server", slog.String("addr", server.Addr))
 
-	err := server.ListenAndServe()
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error(
+				"server crashed",
+				slog.Any("error", err),
+			)
+		}
+	}()
+
+	<-ctx.Done()
+
+	logger.Info("shutting down server")
+
+	// Gracefully shutdown the server with a timeout
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := server.Shutdown(shutdownCtx)
 	if err != nil {
-		logger.Error("server stopped", slog.Any("error", err))
+		logger.Error("server shutdown error", slog.Any("error", err))
+	} else {
+		logger.Info("server shutdown complete")
 	}
 }
