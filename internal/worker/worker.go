@@ -12,12 +12,12 @@ import (
 
 type Worker struct {
 	id     int
-	store  *store.Store
+	store  store.Store
 	queue  chan string // Workers should only read from the queue, so we use a receive-only channel
 	logger *slog.Logger
 }
 
-func NewWorker(id int, s *store.Store, queue chan string, logger *slog.Logger) *Worker {
+func NewWorker(id int, s store.Store, queue chan string, logger *slog.Logger) *Worker {
 	return &Worker{
 		id:     id,
 		store:  s,
@@ -54,7 +54,7 @@ func (w *Worker) process(jobID string, ctx context.Context) {
 
 	w.logger.Info("job processing started", "job_id", jobID)
 
-	retryCount, maxRetries, err := w.store.MarkProcessing(jobID)
+	retryCount, maxRetries, err := w.store.MarkProcessing(jobCtx, jobID)
 	if err != nil {
 		w.logger.Error("failed to mark job as processing", "job_id", jobID, "error", err)
 		return
@@ -65,17 +65,17 @@ func (w *Worker) process(jobID string, ctx context.Context) {
 	select {
 	case <-time.After(3 * time.Second):
 	case <-jobCtx.Done():
-		w.handleFailure(jobID, retryCount, maxRetries, jobCtx.Err())
+		w.handleFailure(jobCtx, jobID, retryCount, maxRetries, jobCtx.Err())
 		return
 	}
 
 	// Fail randomly
 	if rand.Intn(10) < 5 { // 50% chance of failure
-		w.handleFailure(jobID, retryCount, maxRetries, fmt.Errorf("simulated failure"))
+		w.handleFailure(jobCtx, jobID, retryCount, maxRetries, fmt.Errorf("simulated failure"))
 		return
 	}
 
-	err = w.store.MarkDone(jobID, "job completed")
+	err = w.store.MarkDone(jobCtx, jobID, "job completed")
 	if err != nil {
 		w.logger.Error("failed to mark job as done", "job_id", jobID, "error", err)
 		return
@@ -84,13 +84,13 @@ func (w *Worker) process(jobID string, ctx context.Context) {
 	w.logger.Info("job processing completed", "job_id", jobID, "result", "job completed")
 }
 
-func (w *Worker) handleFailure(jobID string, retryCount int, maxRetries int, error error) {
+func (w *Worker) handleFailure(jobCtx context.Context, jobID string, retryCount int, maxRetries int, error error) {
 	// For now we won't differentiate between different types of errors, but in a real system, you might want to have different retry strategies based on the error type (e.g., transient vs. permanent errors).
 
 	// Check if we've reached the maximum retry limit
 	if retryCount >= maxRetries {
 		w.logger.Error("job failed after max retries", "job_id", jobID, "retry_count", retryCount)
-		err := w.store.MarkFailed(jobID, "job failed after max retries")
+		err := w.store.MarkFailed(jobCtx, jobID, "job failed after max retries")
 		if err != nil {
 			w.logger.Error("failed to mark job as failed", "job_id", jobID, "error", err)
 		}
@@ -98,7 +98,7 @@ func (w *Worker) handleFailure(jobID string, retryCount int, maxRetries int, err
 	}
 
 	w.logger.Error("job processing failed", "job_id", jobID, "error", error)
-	retryCount, err := w.store.MarkRetrying(jobID, error.Error())
+	retryCount, err := w.store.MarkRetrying(jobCtx, jobID, error.Error())
 	if err != nil {
 		w.logger.Error("failed to mark job as retrying", "job_id", jobID, "error", err)
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -12,18 +13,19 @@ import (
 
 var ErrJobNotFound = errors.New("job not found")
 
-type Store struct {
+type MemoryStore struct {
 	mu   sync.RWMutex
 	jobs map[string]job.Job
 }
 
-func NewStore() *Store {
-	return &Store{
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{
 		jobs: make(map[string]job.Job),
 	}
 }
 
-func (s *Store) CreateJob(payload string) job.Job {
+func (s *MemoryStore) Create(ctx context.Context, payload string) (job.Job, error) {
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j := job.Job{
@@ -36,10 +38,10 @@ func (s *Store) CreateJob(payload string) job.Job {
 		UpdatedAt:  time.Now().UTC(),
 	}
 	s.jobs[j.ID] = j
-	return j
+	return j, nil
 }
 
-func (s *Store) GetJob(id string) (job.Job, error) {
+func (s *MemoryStore) Get(ctx context.Context, id string) (job.Job, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	j, exists := s.jobs[id]
@@ -49,7 +51,7 @@ func (s *Store) GetJob(id string) (job.Job, error) {
 	return j, nil
 }
 
-func (s *Store) MarkProcessing(jobID string) (int, int, error) {
+func (s *MemoryStore) MarkProcessing(ctx context.Context, jobID string) (int, int, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -70,7 +72,7 @@ func (s *Store) MarkProcessing(jobID string) (int, int, error) {
 	return j.RetryCount, j.MaxRetries, nil
 }
 
-func (s *Store) MarkFailed(jobID string, errMsg string) error {
+func (s *MemoryStore) MarkFailed(ctx context.Context, jobID string, errMsg string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,7 +94,7 @@ func (s *Store) MarkFailed(jobID string, errMsg string) error {
 	return nil
 }
 
-func (s *Store) MarkDone(jobID string, result string) error {
+func (s *MemoryStore) MarkDone(ctx context.Context, jobID string, result string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,7 +116,7 @@ func (s *Store) MarkDone(jobID string, result string) error {
 	return nil
 }
 
-func (s *Store) MarkRetrying(jobID string, errMsg string) (int, error) {
+func (s *MemoryStore) MarkRetrying(ctx context.Context, jobID string, errMsg string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

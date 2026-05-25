@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +16,8 @@ import (
 	"github/aniayoub/resilient-job-system/internal/logging"
 	"github/aniayoub/resilient-job-system/internal/store"
 	"github/aniayoub/resilient-job-system/internal/worker"
+
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -27,8 +31,13 @@ func main() {
 	// Initialize structured logger
 	logger := logging.New()
 
-	// Initialize an in-memory jobStore for jobs
-	jobStore := store.NewStore()
+	// Initialize the job store
+	jobStore, dbCloser, err := initStore(ctx, logger)
+	if err != nil {
+		logger.Error("failed to initialize store", slog.Any("error", err))
+		return
+	}
+	defer dbCloser.Close()
 
 	// Initialize a shared queue for workers
 	queue := make(chan string, 100)
@@ -70,10 +79,33 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := server.Shutdown(shutdownCtx)
+	err = server.Shutdown(shutdownCtx)
 	if err != nil {
 		logger.Error("server shutdown error", slog.Any("error", err))
 	} else {
 		logger.Info("server shutdown complete")
 	}
+}
+
+func initStore(ctx context.Context, logger *slog.Logger) (store.Store, io.Closer, error) {
+	databaseURL := "postgres://user:password@localhost:5432/resilient-job-system?sslmode=disable"
+
+	// Open a connection to the PostgreSQL database
+	db, err := sql.Open("postgres", databaseURL)
+	if err != nil {
+		logger.Error("failed to connect to database", slog.Any("error", err))
+		return nil, nil, err
+	}
+
+	logger.Info("connected to database")
+
+	// Verify the database connection
+	err = db.PingContext(ctx)
+	if err != nil {
+		logger.Error("failed to ping database", slog.Any("error", err))
+		return nil, nil, err
+	}
+
+	logger.Info("database connection verified")
+	return store.NewPostgresStore(db), db, nil
 }

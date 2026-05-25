@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -16,7 +18,15 @@ func main() {
 		go func(i int) {
 			defer wg.Done()
 
-			body := `{"payload":"test job ` + string(rune(i)) + `"}`
+			b := make([]byte, 16)
+			_, err := rand.Read(b)
+			if err != nil {
+				log.Fatal(err)
+			}
+			// Format as xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+			uuid := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+
+			body := `{"payload":"test job ` + uuid + `"}`
 			r, err := http.Post(
 				"http://localhost:8080/jobs",
 				"application/json",

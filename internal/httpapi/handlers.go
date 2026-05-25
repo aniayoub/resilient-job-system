@@ -10,7 +10,7 @@ import (
 )
 
 type Handler struct {
-	store  *store.Store
+	store  store.Store
 	queue  chan<- string // Handlers should only write to the queue, so we use a send-only channel
 	logger *slog.Logger
 }
@@ -19,7 +19,7 @@ type CreateJobRequest struct {
 	Payload string `json:"payload"`
 }
 
-func NewHandler(store *store.Store, queue chan<- string, logger *slog.Logger) *Handler {
+func NewHandler(store store.Store, queue chan<- string, logger *slog.Logger) *Handler {
 	return &Handler{store: store, queue: queue, logger: logger}
 }
 
@@ -44,7 +44,7 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.store.GetJob(id)
+	job, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		if err == store.ErrJobNotFound {
 			logger.Warn("job not found", "job_id", id)
@@ -105,7 +105,12 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new job in the store
-	j := h.store.CreateJob(req.Payload)
+	j, err := h.store.Create(r.Context(), req.Payload)
+	if err != nil {
+		logger.Error("failed to create job", "error", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	logger.Info("job created", "job_id", j.ID, "status", j.Status, "payload_size", len(req.Payload))
 
 	// Send the job ID to the queue for processing

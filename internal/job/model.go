@@ -7,7 +7,7 @@ type Status string
 const (
 	StatusPending   Status = "pending"
 	StatusRunning   Status = "processing"
-	StatusCompleted Status = "done"
+	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
 )
 

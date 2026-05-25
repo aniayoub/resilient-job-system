@@ -2,7 +2,7 @@
 
 This is a Go learning project built in phases.
 
-Current phase: a basic resilient job system with an HTTP API, an in-memory store, a shared queue, a worker pool, retry handling, and graceful shutdown support.
+Current phase: a basic resilient job system with an HTTP API, PostgreSQL persistence, a shared queue, a worker pool, retry handling, and graceful shutdown support.
 
 Small Go service for submitting background jobs and polling their status over HTTP.
 
@@ -12,7 +12,7 @@ The project exposes a simple API that stores jobs in memory, queues them for asy
 
 - Accepts job creation requests over HTTP.
 - Queues jobs for background processing.
-- Tracks job state in memory.
+- Persists job state through a store abstraction.
 - Processes jobs with a pool of workers.
 - Retries failed jobs up to a configured limit.
 - Returns a temporary error when the queue is full.
@@ -24,10 +24,26 @@ The project exposes a simple API that stores jobs in memory, queues them for asy
 - `cmd/flood`: sends many job creation requests to the API for quick load testing.
 - `internal/httpapi`: HTTP handlers and route registration.
 - `internal/worker`: worker pool, retry behavior, and timeout-aware job execution.
-- `internal/store`: in-memory job storage and retry tracking.
+- `internal/store`: store interface plus memory and PostgreSQL implementations.
 - `internal/job`: job model and statuses.
+- `migrations`: SQL schema for the PostgreSQL-backed job store.
 
 ## Run
+
+The API currently uses PostgreSQL directly. By default it connects to:
+
+```text
+postgres://user:password@localhost:5432/resilient-job-system?sslmode=disable
+```
+
+Create the database and apply the migration before starting the API:
+
+```bash
+createdb -h localhost -U user resilient-job-system
+psql -h localhost -U user -d resilient-job-system -f migrations/001_create_jobs.sql
+```
+
+If your local PostgreSQL credentials differ, update the connection string in `cmd/api/main.go` first.
 
 Start the API server:
 
@@ -99,7 +115,7 @@ Possible job statuses:
 
 - `pending`
 - `processing`
-- `done`
+- `completed`
 - `failed`
 
 Job responses also include retry metadata:
@@ -112,7 +128,8 @@ Completed jobs include a `result` field. Failed jobs include the final failure i
 
 ## Notes
 
-- Storage is in memory only, so all jobs are lost when the API process stops.
+- The API entry point currently uses the PostgreSQL store.
+- The in-memory store still exists behind the shared store interface for development and comparison.
 - Processing is simulated with a fixed delay of about 3 seconds.
 - Each job runs with a 5-second context timeout.
 - The API currently starts 5 workers.
