@@ -2,11 +2,11 @@
 
 This is a Go learning project built in phases.
 
-Current phase: a basic resilient job system with an HTTP API, PostgreSQL persistence, a shared queue, a worker pool, retry handling, and graceful shutdown support.
+Current phase: a basic resilient job system with an HTTP API, PostgreSQL persistence, lifecycle reporting, a worker pool, retry handling, and graceful shutdown support.
 
-Small Go service for submitting background jobs and polling their status over HTTP.
+Small Go service for submitting background jobs, polling their status, and viewing aggregate job counts over HTTP.
 
-The project exposes a simple API that stores jobs in memory, queues them for asynchronous processing, and updates each job as it moves through its lifecycle.
+The project exposes a simple API that persists jobs in PostgreSQL, queues them for asynchronous processing, and updates each job as it moves through its lifecycle.
 
 ## What It Does
 
@@ -15,6 +15,7 @@ The project exposes a simple API that stores jobs in memory, queues them for asy
 - Persists job state through a store abstraction.
 - Processes jobs with a pool of workers.
 - Retries failed jobs up to a configured limit.
+- Exposes an aggregate status report endpoint.
 - Returns a temporary error when the queue is full.
 - Cancels work cleanly during server shutdown.
 
@@ -24,8 +25,8 @@ The project exposes a simple API that stores jobs in memory, queues them for asy
 - `cmd/flood`: sends many job creation requests to the API for quick load testing.
 - `internal/httpapi`: HTTP handlers and route registration.
 - `internal/worker`: worker pool, retry behavior, and timeout-aware job execution.
-- `internal/store`: store interface plus memory and PostgreSQL implementations.
-- `internal/job`: job model and statuses.
+- `internal/store`: store interface and PostgreSQL implementation.
+- `internal/job`: job model, statuses, and aggregate stats model.
 - `migrations`: SQL schema for the PostgreSQL-backed job store.
 
 ## Run
@@ -41,6 +42,7 @@ Create the database and apply the migration before starting the API:
 ```bash
 createdb -h localhost -U user resilient-job-system
 psql -h localhost -U user -d resilient-job-system -f migrations/001_create_jobs.sql
+psql -h localhost -U user -d resilient-job-system -f migrations/002_jobs_completed_extension.sql
 ```
 
 If your local PostgreSQL credentials differ, update the connection string in `cmd/api/main.go` first.
@@ -63,6 +65,12 @@ Fetch a job by ID:
 
 ```bash
 curl http://localhost:8080/jobs/<job-id>
+```
+
+Fetch an aggregate job status report:
+
+```bash
+curl http://localhost:8080/status
 ```
 
 Run the flood client to submit multiple jobs concurrently:
@@ -123,13 +131,29 @@ Job responses also include retry metadata:
 - `retry_count`: how many retry attempts have already been used.
 - `max_retries`: maximum retries allowed for the job.
 - `last_error`: the latest processing error before a retry or final failure.
+- `completed_at`: when the job was marked as completed.
 
 Completed jobs include a `result` field. Failed jobs include the final failure information.
+
+### `GET /status`
+
+Returns aggregate job counts by lifecycle state.
+
+Example response:
+
+```json
+{
+  "pending": 3,
+  "running": 2,
+  "completed": 18,
+  "failed": 1
+}
+```
 
 ## Notes
 
 - The API entry point currently uses the PostgreSQL store.
-- The in-memory store still exists behind the shared store interface for development and comparison.
+- The `completed_at` column is added by the second migration.
 - Processing is simulated with a fixed delay of about 3 seconds.
 - Each job runs with a 5-second context timeout.
 - The API currently starts 5 workers.

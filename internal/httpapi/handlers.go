@@ -26,6 +26,37 @@ func NewHandler(store store.Store, queue chan<- string, logger *slog.Logger) *Ha
 func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/jobs", h.CreateJob)
 	http.HandleFunc("/jobs/", h.GetJob)
+	http.HandleFunc("/status", h.GetStatus)
+}
+
+func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	logger := h.logger.With("request_id", logging.RequestIDFromContext(r.Context()))
+
+	if r.Method != http.MethodGet {
+		logger.Warn("method not allowed", "method", r.Method, "path", r.URL.Path)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats, err := h.store.GetStatusReport(r.Context())
+	if err != nil {
+		logger.Error("failed to get status report", "error", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	err = json.NewEncoder(w).Encode(stats)
+	if err != nil {
+		logger.Error("failed to encode status report", "error", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: Consider removing this log or changing it to debug level in production, as it may be too verbose, and might be considered sensitive information in some contexts.
+	logger.Info("status report fetched", "pending", stats.Pending, "running", stats.Running, "completed", stats.Completed, "failed", stats.Failed)
 }
 
 func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {

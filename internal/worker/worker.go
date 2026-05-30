@@ -75,9 +75,9 @@ func (w *Worker) process(jobID string, ctx context.Context) {
 		return
 	}
 
-	err = w.store.MarkDone(jobCtx, jobID, "job completed")
+	err = w.store.MarkCompleted(jobCtx, jobID, "job completed")
 	if err != nil {
-		w.logger.Error("failed to mark job as done", "job_id", jobID, "error", err)
+		w.logger.Error("failed to mark job as completed", "job_id", jobID, "error", err)
 		return
 	}
 
