@@ -23,6 +23,7 @@ The project exposes a simple API that persists jobs in PostgreSQL, queues them f
 
 - `cmd/api`: starts the HTTP API server on `localhost:8080`.
 - `cmd/flood`: sends many job creation requests to the API for quick load testing.
+- `internal/config`: loads runtime configuration from environment variables.
 - `internal/httpapi`: HTTP handlers and route registration.
 - `internal/worker`: worker pool, retry behavior, and timeout-aware job execution.
 - `internal/store`: store interface and PostgreSQL implementation.
@@ -31,11 +32,7 @@ The project exposes a simple API that persists jobs in PostgreSQL, queues them f
 
 ## Run
 
-The API currently uses PostgreSQL directly. By default it connects to:
-
-```text
-postgres://user:password@localhost:5432/resilient-job-system?sslmode=disable
-```
+The API currently uses PostgreSQL directly and loads its runtime settings from environment variables.
 
 Create the database and apply the migration before starting the API:
 
@@ -45,7 +42,15 @@ psql -h localhost -U user -d resilient-job-system -f migrations/001_create_jobs.
 psql -h localhost -U user -d resilient-job-system -f migrations/002_jobs_completed_extension.sql
 ```
 
-If your local PostgreSQL credentials differ, update the connection string in `cmd/api/main.go` first.
+Set the required configuration before starting the API:
+
+```bash
+export DATABASE_URL='postgres://user:password@localhost:5432/resilient-job-system?sslmode=disable'
+export WORKER_COUNT=5
+export QUEUE_SIZE=100
+```
+
+`DATABASE_URL` is required. `WORKER_COUNT` and `QUEUE_SIZE` are optional and default to `5` and `100`.
 
 Start the API server:
 
@@ -153,10 +158,11 @@ Example response:
 ## Notes
 
 - The API entry point currently uses the PostgreSQL store.
+- Runtime configuration is loaded from environment variables.
 - The `completed_at` column is added by the second migration.
 - Processing is simulated with a fixed delay of about 3 seconds.
 - Each job runs with a 5-second context timeout.
-- The API currently starts 5 workers.
+- The API defaults to 5 workers and a queue size of 100 unless overridden by config.
 - The server shuts down gracefully on `SIGINT` and `SIGTERM`.
 - The worker intentionally fails some jobs to exercise retry and failure paths during development.
 

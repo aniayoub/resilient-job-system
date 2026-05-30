@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github/aniayoub/resilient-job-system/internal/config"
 	"github/aniayoub/resilient-job-system/internal/httpapi"
 	"github/aniayoub/resilient-job-system/internal/logging"
 	"github/aniayoub/resilient-job-system/internal/store"
@@ -31,8 +32,15 @@ func main() {
 	// Initialize structured logger
 	logger := logging.New()
 
+	cfg, err := config.Load()
+
+	if err != nil {
+		logger.Error("failed to load config", slog.Any("error", err))
+		return
+	}
+
 	// Initialize the job store
-	jobStore, dbCloser, err := initStore(ctx, logger)
+	jobStore, dbCloser, err := initStore(ctx, cfg.DatabaseURL, logger)
 	if err != nil {
 		logger.Error("failed to initialize store", slog.Any("error", err))
 		return
@@ -40,14 +48,14 @@ func main() {
 	defer dbCloser.Close()
 
 	// Initialize a shared queue for workers
-	queue := make(chan string, 100)
+	queue := make(chan string, cfg.QueueSize)
 
 	// Initialize handler with the store and queue
 	handler := httpapi.NewHandler(jobStore, queue, logger.With("component", "httpapi"))
 	handler.RegisterRoutes()
 
 	// Initialize and start a pool of workers
-	workerCount := 5
+	workerCount := cfg.WorkerCount
 	for i := 0; i < workerCount; i++ {
 		worker := worker.NewWorker(i, jobStore, queue, logger.With("component", "worker", "worker_id", i))
 		worker.Start(ctx)
@@ -87,8 +95,8 @@ func main() {
 	}
 }
 
-func initStore(ctx context.Context, logger *slog.Logger) (store.Store, io.Closer, error) {
-	databaseURL := "postgres://user:password@localhost:5432/resilient-job-system?sslmode=disable"
+func initStore(ctx context.Context, databaseURL string, logger *slog.Logger) (store.Store, io.Closer, error) {
+	//databaseURL := "postgres://user:password@localhost:5432/resilient-job-system?sslmode=disable"
 
 	// Open a connection to the PostgreSQL database
 	db, err := sql.Open("postgres", databaseURL)
